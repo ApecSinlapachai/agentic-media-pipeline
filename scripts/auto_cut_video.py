@@ -13,8 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-YOUTUBE_DIR = Path(__file__).resolve().parent.parent
-MEDIA_DIR = YOUTUBE_DIR / "media"
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+MEDIA_DIR = PROJECT_DIR / "media"
 RAW_DIR = MEDIA_DIR / "01-raw"
 AUTOCUT_DIR = MEDIA_DIR / "02-autocut"
 SCRATCH_DIR = MEDIA_DIR / "_scratch"
@@ -46,7 +46,7 @@ def find_binary(name: str) -> str:
             return str(path)
 
     raise FileNotFoundError(
-        f"ไม่พบโปรแกรม '{name}' กรุณาติดตั้งด้วยคำสั่ง: winget install Gyan.FFmpeg"
+        f"Binary '{name}' not found. Install FFmpeg first (e.g. 'winget install Gyan.FFmpeg' on Windows)."
     )
 
 
@@ -59,17 +59,17 @@ def parse_timestamp(ts: str) -> float:
         return int(parts[0]) * 60 + float(parts[1])
     if len(parts) == 3:
         return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-    raise ValueError(f"รูปแบบเวลาไม่ถูกต้อง: '{ts}' (ใช้ MM:SS หรือ HH:MM:SS)")
+    raise ValueError(f"Invalid timestamp format: '{ts}' (expected MM:SS or HH:MM:SS)")
 
 
 def parse_cut_range(spec: str) -> Tuple[float, float]:
     """Parse 'START-END' into a (start_sec, end_sec) tuple."""
     if "-" not in spec:
-        raise ValueError(f"รูปแบบช่วงตัดไม่ถูกต้อง: '{spec}' (ตัวอย่างที่ถูก: 04:30-06:45)")
+        raise ValueError(f"Invalid cut range: '{spec}' (example: 04:30-06:45)")
     left, right = spec.split("-", 1)
     start, end = parse_timestamp(left), parse_timestamp(right)
     if end <= start:
-        raise ValueError(f"เวลาจบต้องมากกว่าเวลาเริ่ม: '{spec}'")
+        raise ValueError(f"End timestamp must be greater than start timestamp: '{spec}'")
     return (start, end)
 
 
@@ -245,13 +245,13 @@ def concat_segments(
 def find_latest_raw_video(raw_dir: Path = RAW_DIR) -> Path:
     """Return the most recently modified video file inside media/01-raw/."""
     if not raw_dir.exists():
-        raise FileNotFoundError(f"ไม่พบโฟลเดอร์ต้นฉบับ: {raw_dir}")
+        raise FileNotFoundError(f"Raw media directory not found: {raw_dir}")
     candidates = [
         p for p in raw_dir.iterdir()
         if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
     ]
     if not candidates:
-        raise FileNotFoundError(f"ยังไม่มีไฟล์วิดีโอในโฟลเดอร์: {raw_dir}")
+        raise FileNotFoundError(f"No video files found in: {raw_dir}")
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
@@ -273,7 +273,7 @@ def inspect_media(
 ) -> Path:
     """Run volumedetect and export a 9x6 overview contact sheet into media/_scratch/."""
     duration = get_duration(ffprobe_bin, input_path)
-    print(f"🎬 ไฟล์: {input_path.name} (ความยาว {format_ts(duration)})")
+    print(f"File: {input_path.name} (duration {format_ts(duration)})")
 
     vol_cmd = [ffmpeg_bin, "-i", str(input_path), "-af", "volumedetect", "-vn", "-f", "null", "-"]
     vol_res = subprocess.run(vol_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -281,7 +281,7 @@ def inspect_media(
     max_match = re.search(r"max_volume:\s*([-0-9.]+)\s*dB", vol_res.stderr)
     mean_db = mean_match.group(1) if mean_match else "N/A"
     max_db = max_match.group(1) if max_match else "N/A"
-    print(f"🔊 ความดังเสียง: mean_volume = {mean_db} dB | max_volume = {max_db} dB")
+    print(f"Loudness: mean_volume = {mean_db} dB | max_volume = {max_db} dB")
 
     scratch_dir.mkdir(parents=True, exist_ok=True)
     contact_out = (scratch_dir / f"{input_path.stem}_contact.png").resolve()
@@ -300,71 +300,71 @@ def inspect_media(
         str(contact_out),
     ]
     subprocess.run(cs_cmd, check=True)
-    print(f"🖼️ Contact Sheet (1 ช่อง = {step_sec}s): {contact_out}")
+    print(f"Contact Sheet (1 tile = {step_sec}s): {contact_out}")
     return contact_out
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="ตัดช่วงที่ต้องการเอาออก (เช่น Live Demo) และตัดช่วงเงียบอัตโนมัติด้วย FFmpeg"
+        description="Auto-cut manual exclusion ranges and dead silence from videos using FFmpeg."
     )
-    parser.add_argument("input", nargs="?", help="ไฟล์วิดีโอต้นฉบับ (.mp4 / .mkv) หรือใช้ --latest")
+    parser.add_argument("input", nargs="?", help="Source video file (.mp4 / .mkv) or use --latest")
     parser.add_argument(
         "--latest",
         action="store_true",
-        help="เลือกไฟล์วิดีโอล่าสุดจาก 02-Business/YouTube/media/01-raw/ อัตโนมัติ",
+        help="Automatically select the newest video file in media/01-raw/",
     )
     parser.add_argument(
         "--inspect",
         action="store_true",
-        help="ตรวจ volumedetect + สร้าง Contact Sheet ลง media/_scratch/ โดยยังไม่ Render",
+        help="Run volumedetect and export a 9x6 contact sheet into media/_scratch/ without rendering",
     )
     parser.add_argument(
         "--cut",
         action="append",
         default=[],
-        help="ช่วงเวลาที่ต้องการตัดออก รูปแบบ MM:SS-MM:SS (ใส่ซ้ำได้หลายช่วง)",
+        help="Manual time range to exclude in MM:SS-MM:SS format (repeatable)",
     )
     parser.add_argument(
         "--remove-silence",
         action="store_true",
-        help="เปิดการตรวจและตัดช่วงเงียบอัตโนมัติ",
+        help="Enable automatic silence detection and removal",
     )
-    parser.add_argument("--noise-db", type=float, default=-50.0, help="เกณฑ์ความดังเสียงเงียบ (dB, ค่าเริ่มต้น -50)")
-    parser.add_argument("--min-silence", type=float, default=0.9, help="ความยาวช่วงเงียบขั้นต่ำที่จะตัด (วินาที, ค่าเริ่มต้น 0.9)")
-    parser.add_argument("--pad", type=float, default=0.2, help="กันขอบก่อน/หลังคำพูดไม่ให้ห้วน (วินาที, ค่าเริ่มต้น 0.2)")
-    parser.add_argument("--min-segment", type=float, default=0.55, help="ความยาวช่วงพูดขั้นต่ำที่เก็บไว้ (วินาที, ค่าเริ่มต้น 0.55 กันเสียงคลิกเมาส์)")
-    parser.add_argument("--normalize", action="store_true", help="ปรับระดับเสียงให้ดังสม่ำเสมอมาตรฐาน YouTube (-16 LUFS)")
-    parser.add_argument("--output", help="ไฟล์ปลายทาง (ค่าเริ่มต้น: media/02-autocut/<stem>_autocut.mp4 หรือ <stem>_edited.mp4)")
-    parser.add_argument("--dry-run", action="store_true", help="แสดงรายการช่วงที่จะเก็บไว้โดยยังไม่ Render จริง")
+    parser.add_argument("--noise-db", type=float, default=-50.0, help="Silence threshold in dB (default: -50)")
+    parser.add_argument("--min-silence", type=float, default=0.9, help="Minimum silence duration to cut in seconds (default: 0.9)")
+    parser.add_argument("--pad", type=float, default=0.2, help="Speech boundary padding in seconds (default: 0.2)")
+    parser.add_argument("--min-segment", type=float, default=0.55, help="Minimum kept speech segment in seconds (default: 0.55 to filter clicks)")
+    parser.add_argument("--normalize", action="store_true", help="Normalize output audio to YouTube loudness standard (-16 LUFS)")
+    parser.add_argument("--output", help="Output file path (default: media/02-autocut/<stem>_autocut.mp4 or <stem>_edited.mp4)")
+    parser.add_argument("--dry-run", action="store_true", help="Preview kept segments without rendering video")
 
     args = parser.parse_args()
     if args.latest and args.input:
-        print("❌ กรุณาเลือกอย่างใดอย่างหนึ่งระหว่างระบุไฟล์ Input หรือ --latest", file=sys.stderr)
+        print("Error: Provide either an input file path or --latest, not both.", file=sys.stderr)
         return 1
 
     try:
         if args.latest:
             input_path = find_latest_raw_video().resolve()
-            print(f"📥 เลือกไฟล์ล่าสุดจาก 01-raw/: {input_path.name}")
+            print(f"Selected latest raw video from media/01-raw/: {input_path.name}")
         elif args.input:
             input_path = Path(args.input).expanduser().resolve()
         else:
             parser.print_help()
             return 1
     except FileNotFoundError as exc:
-        print(f"❌ {exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     if not input_path.exists():
-        print(f"❌ ไม่พบไฟล์: {input_path}", file=sys.stderr)
+        print(f"Error: Input file not found: {input_path}", file=sys.stderr)
         return 1
 
     try:
         ffmpeg_bin = find_binary("ffmpeg")
         ffprobe_bin = find_binary("ffprobe")
     except FileNotFoundError as exc:
-        print(f"❌ {exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     if args.inspect:
@@ -375,31 +375,31 @@ def main() -> int:
     excludes: List[Tuple[float, float]] = [parse_cut_range(c) for c in args.cut]
 
     if args.remove_silence:
-        print("🔍 กำลังสแกนหาช่วงเงียบในวิดีโอ...")
+        print("Scanning video for silent spans...")
         silences = detect_silence(
             ffmpeg_bin, input_path, duration, args.noise_db, args.min_silence, args.pad
         )
-        print(f"   พบช่วงเงียบที่ตัดได้: {len(silences)} ช่วง")
+        print(f"   Found {len(silences)} removable silence spans")
         excludes.extend(silences)
 
     segments = subtract_intervals([(0.0, duration)], excludes, min_len=args.min_segment)
     if not segments:
-        print("❌ ไม่เหลือช่วงวิดีโอหลังหักช่วงตัดออก", file=sys.stderr)
+        print("Error: No video segments remain after applying exclusions.", file=sys.stderr)
         return 1
 
     kept_total = sum(e - s for s, e in segments)
-    print(f"📊 ต้นฉบับ: {format_ts(duration)} ➡️ หลังตัด: {format_ts(kept_total)} ({len(segments)} ช่วง)")
+    print(f"Summary: {format_ts(duration)} -> {format_ts(kept_total)} ({len(segments)} segments)")
     for idx, (s, e) in enumerate(segments, 1):
         print(f"   [{idx:02d}] {format_ts(s)} -> {format_ts(e)} ({e - s:.2f}s)")
 
     if args.dry_run:
-        print("ℹ️ โหมด --dry-run: ยังไม่ได้เขียนไฟล์วิดีโอ")
+        print("Dry-run mode: skipped video rendering.")
         return 0
 
     out_path = resolve_default_output(input_path, args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"🎬 กำลังตัดต่อ {len(segments)} ช่วง และ Render ไปที่: {out_path.name} ...")
+    print(f"Extracting {len(segments)} segments and rendering to: {out_path.name} ...")
     with tempfile.TemporaryDirectory(prefix="yt_autocut_") as tmp_dir:
         tmp_root = Path(tmp_dir)
         seg_paths: List[Path] = []
@@ -408,12 +408,12 @@ def main() -> int:
             cut_segment(ffmpeg_bin, input_path, seg_file, s, e)
             seg_paths.append(seg_file)
             if (idx + 1) % 25 == 0 or (idx + 1) == len(segments):
-                print(f"   ⏳ ตัดเสร็จแล้ว {idx + 1}/{len(segments)} ช่วง")
+                print(f"   Extracted {idx + 1}/{len(segments)} segments")
 
-        print("🔊 กำลังรวมไฟล์" + (" + ปรับเสียงมาตรฐาน YouTube..." if args.normalize else "..."))
+        print("Concatenating segments" + (" + normalizing audio (-16 LUFS)..." if args.normalize else "..."))
         concat_segments(ffmpeg_bin, seg_paths, out_path, normalize_audio=args.normalize)
 
-    print(f"✅ เสร็จเรียบร้อย: {out_path}")
+    print(f"Done: {out_path}")
     return 0
 
 
